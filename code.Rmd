@@ -1,0 +1,325 @@
+---
+title: "J-COMP"
+author: "MUSKAAN YADAV 20BCE1622"
+date: "2022-11-05"
+output: html_document
+---
+
+```{r}
+library(rvest)
+library(dplyr)
+library(kableExtra) 
+library(tidyverse)
+library(rsoi)
+library(plotly)
+```
+
+#Scraping from wikipedia
+```{r}
+url  <- "https://en.wikipedia.org/wiki/Accumulated_cyclone_energy"
+# Read HTML page into wbpg object
+wbpg <- read_html(url)
+# Read table information from wbpg object into tbl object
+tbl  <- html_nodes(wbpg, "table")
+# Read required table and save to ACE_Yearly_DF data.frame
+ACE_Yearly_DF <- html_table(tbl[grep("Accumulated Cyclone Energy - Atlantic\n",tbl,ignore.case = T)],fill = T)[[1]]
+colnames(ACE_Yearly_DF)[1]<-"Year"
+# Add Minor Tropical Storms column by calculating it from Tropical Storms, Hurricanes & Major Hurricanes
+ACE_Yearly_DF$MTS <- ACE_Yearly_DF$TS-ACE_Yearly_DF$HU--ACE_Yearly_DF$MH
+# Storing dataframe to csv 
+write.csv(ACE_Yearly_DF,'ACE_Yearly_DF.csv')
+```
+
+
+```{r}
+ACE_Yearly_DF <- read.csv('ACE_Yearly_DF.csv')
+ACE_Yearly_DF
+
+```
+```{r}
+# From 2000 to 2022 
+ACE_Yearly_DF %>% slice(150:172) %>%
+  kbl(caption = "ACE DataFrame (Yearly)") %>%
+  kable_paper("hover", full_width = F, position = "center") %>% 
+  row_spec(0,color="black",background = "yellow")
+```
+
+#Scrape monthly ACE data from the NOAA website
+```{r}
+wbpg2   <- readLines("https://www.psl.noaa.gov/gcos_wgsp/Timeseries/Hurricane/hurr.atl.ace.data")
+# Eliminate first and last five lines
+df.temp <- wbpg2[-c(1,171:178)]
+# 
+df.temp <- gsub(pattern = ' |  |   ',replacement = 'and',x = df.temp)
+df.temp <- gsub(pattern = 'andand',replacement = 'and',x = df.temp)
+df.temp <- str_replace(string = df.temp,pattern = 'and',replacement = '')
+df.temp <- as.data.frame(df.temp)
+clnames <- c("Year","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")
+ACE_Monthly_DF <- df.temp %>% 
+  separate(df.temp, clnames, "and") %>% 
+  gather(key = "Month",value = "ACE",-Year) %>% 
+  mutate(Year = as.numeric(Year), ACE = as.numeric(ACE)) %>% 
+  arrange(Year) %>% 
+  select(Year,Month,ACE)
+
+write.csv(ACE_Monthly_DF,'ACE_Monthly_DF.csv')
+
+```
+#from 1910 to 1934 (ACE monthly data)
+```{r}
+ACE_Monthly_DF <- read.csv('ACE_Monthly_DF.csv')
+ACE_Monthly_DF %>% slice(709:1000)%>%
+  kbl(caption = "ACE DataFrame (Monthly)") %>%
+  kable_paper("hover", full_width = F, position = "center") %>% 
+  row_spec(0,color="black",background = "yellow")
+```
+#ONI data from RSOI package
+```{r}
+enso_monthly_DF <- download_enso()
+enso_yearly_DF <- enso_monthly_DF %>% group_by(Year) %>% summarise(ONI=mean(ONI))
+enso_yearly_DF <- enso_yearly_DF %>%  mutate(phase = case_when(ONI > 0.5 ~ "Warm Phase/El Nino", 
+                                ONI < -0.5  ~ "Cool Phase/La Nina",
+                                ONI < 0.5 & ONI >-0.5  ~ "Neutral Phase"))
+write.csv(enso_monthly_DF,'enso_monthly_DF.csv')
+write.csv(enso_yearly_DF,'enso_yearly_DF.csv')
+enso_yearly_DF
+
+```
+#ONI monthly
+```{r}
+enso_monthly_DF=read.csv('enso_monthly_DF.csv')
+enso_monthly_DF %>% slice(589:861)%>%
+  kbl(caption = "ONI DataFrame (Monthly)") %>%
+  kable_paper("hover", full_width = F, position = "center") %>% 
+  row_spec(0,color="black",background = "yellow")
+
+
+```
+#ONI yearly
+```{r}
+enso_yearly_DF=read.csv("enso_yearly_DF.csv")
+enso_yearly_DF %>% slice(50:72)%>%
+  kbl(caption = "ONI DataFrame (yearly)") %>%
+  kable_paper("hover", full_width = F, position = "center") %>% 
+  row_spec(0,color="black",background = "yellow")
+
+
+
+```
+
+
+```{r}
+# Merging ACE_Yearly_DF and enso_yearly_DF for ease. 
+DF_Graph_Yearly <- merge(ACE_Yearly_DF,enso_yearly_DF,by="Year")
+
+# Font Descriptions to use for Plot. 
+t1 <- list(family = "Arial, sans-serif", size = 13, color = "black")
+t2 <- list(family = "Arial, sans-serif", size = 12, color = "black")
+
+#Creating a DF with Mean_ACE & Mean_Tropical Storms for use in plot 
+hz_line_mean <- data.frame("Year"= DF_Graph_Yearly$Year,"Mean_TS"=rep(mean(ACE_Yearly_DF$TS),nrow(DF_Graph_Yearly)),"Mean_ACE"=rep(mean(ACE_Yearly_DF$ACE),nrow(DF_Graph_Yearly)))
+
+fig.1 <- plot_ly(ACE_Yearly_DF)
+# Adding Tropical Storms as bar chart
+fig.1 <- fig.1 %>% add_trace(data=DF_Graph_Yearly,x=~Year,y=~MTS,type="bar",name="Minor Tropical Storms",marker = list(color = 'rgb(158,202,225)'))
+# Adding Hurricanes as line chart
+fig.1 <- fig.1 %>% add_trace(x=~Year, y=~HU, name = 'Hurricanes',type="scatter",mode="lines",line=list(width=4))
+# Adding Major Hurricanes as line chart
+fig.1 <- fig.1 %>% add_trace(x=~Year, y=~MH, name = 'Major Hurricanes',type="scatter",mode="lines",line=list(width=4))
+#Adding Mean Tropical Storms Line to Plot
+fig.1 <- fig.1 %>% add_trace(x=hz_line_mean$Year,y=hz_line_mean$Mean_TS,name="Mean Total Tropical Storms",            
+                             type="scatter",mode="lines",line=list(width=3,dash='dash',color='blue'))
+fig.1 <- fig.1 %>% layout(title="Tropical Storms - Atlantic Basin",
+                          yaxis = list(title = 'Count of Tropical Storms & Hurricanes',titlefont=t1,tickfont=t2,showgrid=F,showline = T), 
+                          annotations = list(text = "Increase in ACE since 2005", font=t1, x = 2010, y = 20,showarrow=FALSE ),
+                          shapes = list(list(type = "rect", fillcolor = "grey", line = list(color = "grey"), opacity = 0.25,
+                                              x0 = 2000, x1 = 2020, xref = "x",
+                                              y0 = 0, y1 = 30, yref = "y")),
+                          barmode = 'group',
+                          legend = list(orientation = 'v',x=0.05,y=0.9),
+                          xaxis=list(autotick=FALSE, dtick=5,title="Year",titlefont=t1,tickfont=t2,showgrid=F))
+fig.1
+```
+#Visualizing ACE data over the years.
+```{r}
+fig.2 <- plot_ly(ACE_Yearly_DF)
+# Adding ACE as bar chart
+fig.2 <- fig.2 %>% add_trace(data=DF_Graph_Yearly,x=~Year,y=~ACE,type="bar",name="Minor Tropical Storms",marker = list(color = 'rgb(158,202,225)'))
+#Adding Mean Tropical Storms Line to Plot
+fig.2 <- fig.2 %>% add_trace(x=hz_line_mean$Year,y=hz_line_mean$Mean_ACE,name="Mean ACE",            
+                             type="scatter",mode="lines",line=list(width=3,dash='dash',color='blue'))
+fig.2 <- fig.2 %>% layout(title="Accumulated Cyclone Energy - Atlantic Basin",
+                          yaxis = list(title = 'ACE (10^4 kn^2)',titlefont=t1,tickfont=t2,showgrid=F,showline = T), 
+                          annotations = list(text = "Increase in ACE since 2005", font=t1, x = 2010, y = 200,showarrow=FALSE ),
+                          shapes = list(list(type = "rect", fillcolor = "grey", line = list(color = "grey"), opacity = 0.25,
+                                              x0 = 2000, x1 = 2020, xref = "x",
+                                              y0 = 0, y1 = 250, yref = "y")),
+                          barmode = 'group',
+                          legend = list(orientation = 'v',x=0.05,y=0.9),
+                          xaxis=list(autotick=FALSE, dtick=5,title="Year",titlefont=t1,tickfont=t2,showgrid=F))
+fig.2
+```
+#ONI data over the years,relationship between El Nino & La Nina conditions.
+```{r}
+#Creating a DF with El Nino & La Nina thresholds
+hz_line_ONI <- data.frame("Year"= DF_Graph_Yearly$Year,"LaNina"=rep(-0.5,nrow(DF_Graph_Yearly)),"ElNino"=rep(0.5,nrow(DF_Graph_Yearly)))
+
+# Font Descriptions to use for Plot - Annotations
+f1 <- list( family = "Arial, sans-serif", size = 13, color = "red" )
+f2 <- list( family = "Arial, sans-serif", size = 13, color = "blue")
+
+
+fig.3 <- plot_ly(DF_Graph_Yearly)
+# Adding ONI as bar chart - red for positive & blue for negative
+fig.3 <- fig.3 %>% add_trace(data=DF_Graph_Yearly,x=~Year,y=~ONI,type="bar",name="ONI",color = ~ONI < 0, colors = c("orangered", "royalblue"))
+# Adding La Nina Threshold
+fig.3 <- fig.3 %>% add_trace(x=hz_line_ONI$Year,y=hz_line_ONI$LaNina,name="La Nina Threshold",            
+                             type="scatter",mode="lines",line=list(width=3,dash='dash',color='blue'))
+# Adding El Nino Threshold
+fig.3 <- fig.3 %>% add_trace(x=hz_line_ONI$Year,y=hz_line_ONI$ElNino,name="El Nino Threshold",            
+                             type="scatter",mode="lines",line=list(width=3,dash='dash',color='red'))
+fig.3 <- fig.3 %>% layout(title="Oceanic Niño Index",
+                          yaxis = list(title = 'ONI (°C)',titlefont=t1,tickfont=t2,showgrid=F,showline = T),
+                          annotations = list(
+                            list(text = "El Nino Threshold", font=f1, x = 2009, y = 0.60,showarrow=FALSE ),
+                            list(text = "La Nina Threshold", font=f2, x = 1963, y = -0.60,showarrow=FALSE )),
+                          showlegend = FALSE,
+                          xaxis=list(autotick=FALSE, dtick=5,title="Year",titlefont=t1,tickfont=t2,showgrid=F))
+fig.3
+```
+#ACE V/s ONI ,taking  monthly data from 2000 to 2020 as a first step.
+```{r}
+
+# Merging ACE_Yearly_DF and enso_yearly_DF for ease.
+DF_Graph_Monthly <- merge(ACE_Monthly_DF,enso_monthly_DF,by=c("Year","Month"))
+
+#margin descriptions
+m = list(l = 35,r = 40,b = 20,t = 50,pad = 1)
+
+fig.4 <- plot_ly(DF_Graph_Monthly)
+# Adding ACE data to Plot
+fig.4 <- fig.4 %>% add_trace(data=DF_Graph_Monthly,x=~Date,y=~ACE,type="bar",name="ACE-Monthly")
+#Adding ONI data to Plot
+fig.4 <- fig.4 %>% add_trace(data=DF_Graph_Monthly,x=~Date,y=~ONI,type="bar",name="ONI-Monthly", yaxis='y2',marker=list(opacity=0.4))
+fig.4 <- fig.4 %>%  layout(title="Accumulated Cyclone Energy - Atlantic Basin (2000-2020)",
+                           yaxis = list(title = 'ACE (10^4 kn^2)', titlefont=t1,tickfont=t2,showgrid=F,showline = T,side='left',zeroline=F,range=c(-180,180)), 
+                           yaxis2 = list(title = 'ONI °C', titlefont=t1,tickfont=t2,showgrid=F,showline = T,side='right',overlaying = "y",zeroline=F,range=c(-3,3)), 
+                          legend = list(orientation = 'v',x=0.05,y=0.9),
+                          xaxis=list(autotick=T,title="Year",titlefont=t1,tickfont=t2,showgrid=F,showline = T,zeroline=F,
+                                     range = c("2005-01-01", "2020-01-01")),
+                          margin = m)
+fig.4
+```
+#determining relationship between ACE and ONI
+```{r}
+
+fig.6 <- plot_ly(DF_Graph_Yearly)
+fig.6 <- fig.6 %>% add_trace(data=DF_Graph_Yearly,x=~ACE,y=~ONI,type="scatter",color=~phase)
+fig.6 <- fig.6 %>% layout(title="Crossplot: ACE vs ONI",
+                          yaxis = list(title = 'ONI (°C)',titlefont=t1,tickfont=t2,showgrid=F,showline = T,zeroline=F),
+                          legend = list(orientation = 'v',x=0.7,y=0.9),
+                          xaxis=list(autotick=F, dtick=20,title="ACE (10^4 kn^2)",titlefont=t1,tickfont=t2,showline = T,showgrid=F,
+                                     type="linear",range=c(0,300)))
+fig.6
+```
+
+#Conditional Probability for Monthly Data
+#ACE > 10 = “Active”
+#ACE < 4 = “Not Active”
+#ACE > 4 & <10 = “Moderate”
+```{r}
+
+DF_Graph_Monthly <- DF_Graph_Monthly %>%  mutate(activity = case_when(ACE > 10 ~ "Active", 
+                                ACE < 4  ~ "Not Active",
+                                ACE > 4 & ACE <10 ~ "Moderate"))
+cond_prob_monthly <- prop.table(table(DF_Graph_Monthly$activity, DF_Graph_Monthly$phase), margin = 1)
+cond_prob_monthly %>% 
+  kbl(caption = "Joint and Conditional Probability Tables - Monthly Data",digits=2) %>%
+   kable_paper("hover", full_width = T, position = "center") %>% 
+  row_spec(0,color="black",background = "yellow")
+```
+#Inference: El Niño conditions favors stronger hurricane activity in the central and eastern Pacific basins, and suppresses it in the Atlantic basin. Conversely, La Niña suppresses hurricane activity in the central and eastern Pacific basins, and enhances it in the Atlantic basin Let’s look at this by looking at the conditional probabilities.
+
+
+
+#Conditional Probability for Annual data 
+
+```{r}
+DF_Graph_Yearly <- merge(ACE_Yearly_DF,enso_yearly_DF,by=c("Year"))
+cond_prob_yearly <- prop.table(table(DF_Graph_Yearly$Classification, DF_Graph_Yearly$phase), margin = 1)
+
+cond_prob_yearly %>% 
+  kbl(caption = "Joint and Conditional Probability Tables - Yearly Data",digits=2) %>%
+   kable_paper("hover", full_width = T, position = "center") %>% 
+  row_spec(0,color="black",background = "yellow")
+```
+#Inference: It is hard to see a high hurricane activity during the La Nina season, we can  see a low occurance of cyclone activity during El Nino conditions.
+
+
+
+#regression equation
+```{r}
+DF_Graph_Yearly$phase <- as.factor(DF_Graph_Yearly$phase) 
+DF_Graph_Yearly$phase <- relevel(DF_Graph_Yearly$phase, ref = "Neutral Phase")
+lm_yearly <- lm(DF_Graph_Yearly$ACE~DF_Graph_Yearly$ONI+DF_Graph_Yearly$phase,data=DF_Graph_Yearly)
+summary(lm_yearly)
+
+```
+
+#plotting  the model on the crossplot to see the fit.
+
+```{r}
+prediction_df <- data.frame(DF_Graph_Yearly$ONI,DF_Graph_Yearly$phase)
+
+prediction_answer <- predict(lm_yearly,prediction_df)
+
+fig.7 <- plot_ly(DF_Graph_Yearly)
+fig.7 <- fig.7 %>% add_trace(data=DF_Graph_Yearly,x=~ACE,y=~ONI,type="scatter",color=~phase)
+fig.7 <- fig.7 %>% add_trace(data=DF_Graph_Yearly,x=~prediction_answer,y=~ONI,type="scatter",mode="line",color=~phase)
+fig.7 <- fig.7 %>% layout(title="Crossplot: ACE vs ONI",
+                          yaxis = list(title = 'ONI (°C)',titlefont=t1,tickfont=t2,showgrid=F,showline = T,zeroline=F),
+                          legend = list(orientation = 'v',x=0.7,y=0.9),
+                          xaxis=list(autotick=F, dtick=20,title="ACE (10^4 kn^2)",titlefont=t1,tickfont=t2,showline = T,showgrid=F,
+                                     type="linear",range=c(0,300)))
+fig.7
+```
+#The fit does not look very good.
+
+
+
+# cross-plot of residual vs. ONI to check for any heteroskedasticity(variance of error term or residual term varies widely)
+```{r}
+fig.8 <- plot_ly(DF_Graph_Yearly)
+fig.8 <- fig.8 %>% add_trace(data=DF_Graph_Yearly,x=~ONI,y=lm_yearly$residuals,type="scatter")
+fig.8 <- fig.8 %>% layout(title="Crossplot of ONI vs Residuals",
+                          yaxis = list(title = 'Residual',titlefont=t1,tickfont=t2,showgrid=F,showline = T,zeroline=F),
+                          xaxis=list(autotick=T,title="ONI (°C)",titlefont=t1,tickfont=t2,showline = T,showgrid=F,zeroline=F,
+                                     type="linear"))
+fig.8
+```
+
+#Histogram of residuals or error 
+```{r}
+fig.9 <- plot_ly(DF_Graph_Yearly)
+fig.9 <- fig.9 %>% add_trace(x=lm_yearly$residuals,type="histogram")
+fig.9 <- fig.9 %>% layout(title="Histogram of Residuals",
+                          yaxis = list(title = 'Frequency',titlefont=t1,tickfont=t2,showgrid=F,showline = T,zeroline=F),
+                          xaxis=list(autotick=T,title="Residual Value",titlefont=t1,tickfont=t2,showline = T,showgrid=F,zeroline=F,
+                                     type="linear"))
+
+fig.9
+```
+```{r}
+#correaltion yearly ACE V/S ONI
+x=cor(ACE_Yearly_DF[1:100,3],enso_yearly_DF[1:100,2],  method = "pearson", use = "complete.obs")
+x[1]
+
+```
+
+#The residuals look fairly normally distributed from the above plots.
+
+#We can conclude that ONI is not a strong predictor of Hurricane Activity.We can also infer that there is no relationship between the ACE and ONI on the basis of conditional probability.ACE can be still be used as a parameter to predict Hurricane Activity as compared to ONI.
+```{r}
+
+```
+
